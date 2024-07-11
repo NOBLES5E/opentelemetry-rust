@@ -41,8 +41,7 @@ otel_unstable = []
 
 [dev-dependencies]
 opentelemetry_sdk = { path = "../opentelemetry-sdk", features = ["logs_level_enabled"]} # for documentation tests
-criterion = { workspace = true }
-rand = { workspace = true }
+criterion = { version = "0.3" }
 
 [[bench]]
 name = "metrics"
@@ -51,8 +50,4 @@ required-features = ["metrics"]
 
 [[bench]]
 name = "attributes"
-harness = false
-
-[[bench]]
-name = "anyvalue"
 harness = false

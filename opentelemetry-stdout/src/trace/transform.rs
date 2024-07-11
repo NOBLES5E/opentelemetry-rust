@@ -9,20 +9,17 @@ pub struct SpanData {
     resource_spans: Vec<ResourceSpans>,
 }
 
-impl SpanData {
-    pub(crate) fn new(
-        sdk_spans: Vec<opentelemetry_sdk::export::trace::SpanData>,
-        sdk_resource: &opentelemetry_sdk::Resource,
-    ) -> Self {
+impl From<Vec<opentelemetry_sdk::export::trace::SpanData>> for SpanData {
+    fn from(sdk_spans: Vec<opentelemetry_sdk::export::trace::SpanData>) -> Self {
         let mut resource_spans = HashMap::<AttributeSet, ResourceSpans>::new();
         for sdk_span in sdk_spans {
-            let resource_schema_url = sdk_resource.schema_url().map(|s| s.to_string().into());
+            let resource_schema_url = sdk_span.resource.schema_url().map(|s| s.to_string().into());
             let schema_url = sdk_span.instrumentation_lib.schema_url.clone();
             let scope = sdk_span.instrumentation_lib.clone().into();
-            let resource: Resource = sdk_resource.into();
+            let resource = sdk_span.resource.as_ref().into();
 
             let rs = resource_spans
-                .entry(sdk_resource.into())
+                .entry(sdk_span.resource.as_ref().into())
                 .or_insert_with(move || ResourceSpans {
                     resource,
                     scope_spans: Vec::with_capacity(1),

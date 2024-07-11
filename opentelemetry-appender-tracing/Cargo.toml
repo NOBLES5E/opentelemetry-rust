@@ -12,7 +12,6 @@ rust-version = "1.65"
 
 [dependencies]
 log = { workspace = true, optional = true }
-once_cell = { workspace = true }
 opentelemetry = { version = "0.23", path = "../opentelemetry", features = ["logs"] }
 tracing = { workspace = true, features = ["std"]}
 tracing-core = { workspace = true }
@@ -24,15 +23,13 @@ log = { workspace = true }
 opentelemetry-stdout = { path = "../opentelemetry-stdout", features = ["logs"] }
 opentelemetry_sdk = { path = "../opentelemetry-sdk", features = ["logs", "testing"]  }
 tracing-log = "0.2"
-async-trait = { workspace = true }
-criterion = { workspace = true }
-
-[target.'cfg(not(target_os = "windows"))'.dev-dependencies]
-pprof = { version = "0.13", features = ["flamegraph", "criterion"] }
+async-trait = "0.1"
+criterion = "0.5.1"
 
 [features]
 experimental_metadata_attributes = ["dep:tracing-log"]
 logs_level_enabled = ["opentelemetry/logs_level_enabled"]
+default = ["logs_level_enabled"]
 
 
 [[bench]]

@@ -3,7 +3,7 @@ use crate::{
         trace::{ExportResult, SpanData, SpanExporter},
         ExportError,
     },
-    trace::{SpanEvents, SpanLinks},
+    trace::{Config, SpanEvents, SpanLinks},
     InstrumentationLibrary,
 };
 use futures_util::future::BoxFuture;
@@ -14,6 +14,7 @@ use opentelemetry::trace::{
 use std::fmt::{Display, Formatter};
 
 pub fn new_test_export_span_data() -> SpanData {
+    let config = Config::default();
     SpanData {
         span_context: SpanContext::new(
             TraceId::from_u128(1),
@@ -32,6 +33,7 @@ pub fn new_test_export_span_data() -> SpanData {
         events: SpanEvents::default(),
         links: SpanLinks::default(),
         status: Status::Unset,
+        resource: config.resource,
         instrumentation_lib: InstrumentationLibrary::default(),
     }
 }

@@ -106,7 +106,10 @@ impl ZipkinPipelineBuilder {
                 ));
                 cfg
             } else {
-                Config::default().with_resource(Resource::empty())
+                Config {
+                    resource: Cow::Owned(Resource::empty()),
+                    ..Default::default()
+                }
             };
             (config, Endpoint::new(service_name, self.service_addr))
         } else {
@@ -116,7 +119,11 @@ impl ZipkinPipelineBuilder {
                 .unwrap()
                 .to_string();
             (
-                Config::default().with_resource(Resource::empty()),
+                Config {
+                    // use a empty resource to prevent TracerProvider to assign a service name.
+                    resource: Cow::Owned(Resource::empty()),
+                    ..Default::default()
+                },
                 Endpoint::new(service_name, self.service_addr),
             )
         }

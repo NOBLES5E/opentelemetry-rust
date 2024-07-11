@@ -1,4 +1,5 @@
 use opentelemetry::global;
+use opentelemetry::metrics::Unit;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::metrics::{
@@ -14,7 +15,7 @@ fn init_meter_provider() -> opentelemetry_sdk::metrics::SdkMeterProvider {
             Some(
                 Stream::new()
                     .name("my_histogram_renamed")
-                    .unit("milliseconds"),
+                    .unit(Unit::new("milliseconds")),
             )
         } else {
             None
@@ -52,7 +53,7 @@ fn init_meter_provider() -> opentelemetry_sdk::metrics::SdkMeterProvider {
     let reader = PeriodicReader::builder(exporter, runtime::Tokio).build();
     let provider = SdkMeterProvider::builder()
         .with_reader(reader)
-        .with_resource(Resource::new([KeyValue::new(
+        .with_resource(Resource::new(vec![KeyValue::new(
             "service.name",
             "metrics-advanced-example",
         )]))
@@ -75,7 +76,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     // using view.
     let histogram = meter
         .f64_histogram("my_histogram")
-        .with_unit("ms")
+        .with_unit(Unit::new("ms"))
         .with_description("My histogram example description")
         .init();
 
@@ -113,7 +114,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     // use a custom set of boundaries, and min/max values will not be recorded.
     let histogram2 = meter
         .f64_histogram("my_second_histogram")
-        .with_unit("ms")
+        .with_unit(Unit::new("ms"))
         .with_description("My histogram example description")
         .init();
 

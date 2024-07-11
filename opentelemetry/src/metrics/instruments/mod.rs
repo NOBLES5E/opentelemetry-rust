@@ -1,4 +1,4 @@
-use crate::metrics::{Meter, MetricsError, Result};
+use crate::metrics::{Meter, MetricsError, Result, Unit};
 use crate::KeyValue;
 use core::fmt;
 use std::any::Any;
@@ -29,7 +29,7 @@ pub struct InstrumentBuilder<'a, T> {
     instrument_provider: &'a dyn InstrumentProvider,
     name: Cow<'static, str>,
     description: Option<Cow<'static, str>>,
-    unit: Option<Cow<'static, str>>,
+    unit: Option<Unit>,
     _marker: marker::PhantomData<T>,
 }
 
@@ -61,8 +61,8 @@ where
     /// Unit must be:
     /// - ASCII string
     /// - No longer than 63 characters
-    pub fn with_unit<S: Into<Cow<'static, str>>>(mut self, unit: S) -> Self {
-        self.unit = Some(unit.into());
+    pub fn with_unit(mut self, unit: Unit) -> Self {
+        self.unit = Some(unit);
         self
     }
 
@@ -112,7 +112,7 @@ where
     meter: &'a Meter,
     name: Cow<'static, str>,
     description: Option<Cow<'static, str>>,
-    unit: Option<Cow<'static, str>>,
+    unit: Option<Unit>,
     _inst: marker::PhantomData<I>,
     callbacks: Vec<Callback<M>>,
 }
@@ -147,8 +147,8 @@ where
     /// Unit must be:
     /// - ASCII string
     /// - No longer than 63 characters
-    pub fn with_unit<S: Into<Cow<'static, str>>>(mut self, unit: S) -> Self {
-        self.unit = Some(unit.into());
+    pub fn with_unit(mut self, unit: Unit) -> Self {
+        self.unit = Some(unit);
         self
     }
 

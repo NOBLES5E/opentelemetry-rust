@@ -5,14 +5,13 @@ receivers:
       http:
 
 exporters:
+  logging:
+    loglevel: debug
   file:
-    path: /testresults/result.json
+    path: /testresults/traces.json
 
 service:
   pipelines:
     traces:
-      receivers: [otlp]
-      exporters: [file]
-    logs:
       receivers: [otlp]
       exporters: [file]

@@ -1,4 +1,4 @@
-use std::borrow::{Borrow, Cow};
+use std::borrow::Cow;
 use std::sync::Arc;
 use std::{fmt, hash};
 
@@ -132,18 +132,6 @@ impl fmt::Display for Key {
             OtelString::Static(s) => s.fmt(fmt),
             OtelString::RefCounted(s) => s.fmt(fmt),
         }
-    }
-}
-
-impl Borrow<str> for Key {
-    fn borrow(&self) -> &str {
-        self.0.as_str()
-    }
-}
-
-impl AsRef<str> for Key {
-    fn as_ref(&self) -> &str {
-        self.0.as_str()
     }
 }
 

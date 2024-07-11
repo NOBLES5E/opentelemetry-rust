@@ -1,25 +1,20 @@
+use log::{info, Level};
 use once_cell::sync::Lazy;
 use opentelemetry::{
     global,
-    metrics::MetricsError,
+    metrics::{MetricsError, Unit},
     trace::{TraceContextExt, TraceError, Tracer, TracerProvider as _},
     Key, KeyValue,
 };
-use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
-use opentelemetry_otlp::Protocol;
-use opentelemetry_otlp::{HttpExporterBuilder, WithExportConfig};
-use opentelemetry_sdk::trace::{self as sdktrace, Config};
+use opentelemetry_appender_log::OpenTelemetryLogBridge;
+use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::trace as sdktrace;
 use opentelemetry_sdk::{
-    logs::{self as sdklogs},
+    logs::{self as sdklogs, Config},
     Resource,
 };
-use std::error::Error;
-use tracing::info;
-use tracing_subscriber::prelude::*;
-use tracing_subscriber::EnvFilter;
 
-#[cfg(feature = "hyper")]
-mod hyper;
+use std::error::Error;
 
 static RESOURCE: Lazy<Resource> = Lazy::new(|| {
     Resource::new(vec![KeyValue::new(
@@ -28,60 +23,54 @@ static RESOURCE: Lazy<Resource> = Lazy::new(|| {
     )])
 });
 
-fn http_exporter() -> HttpExporterBuilder {
-    let exporter = opentelemetry_otlp::new_exporter().http();
-    #[cfg(feature = "hyper")]
-    let exporter = exporter.with_http_client(hyper::HyperClient::default());
-    exporter
-}
-
 fn init_logs() -> Result<sdklogs::LoggerProvider, opentelemetry::logs::LogError> {
     opentelemetry_otlp::new_pipeline()
         .logging()
-        .with_resource(RESOURCE.clone())
+        .with_log_config(Config::default().with_resource(RESOURCE.clone()))
         .with_exporter(
-            http_exporter()
-                .with_protocol(Protocol::HttpBinary) //can be changed to `Protocol::HttpJson` to export in JSON format
+            opentelemetry_otlp::new_exporter()
+                .http()
                 .with_endpoint("http://localhost:4318/v1/logs"),
         )
         .install_batch(opentelemetry_sdk::runtime::Tokio)
 }
 
-fn init_tracer_provider() -> Result<sdktrace::TracerProvider, TraceError> {
+fn init_tracer() -> Result<sdktrace::Tracer, TraceError> {
     opentelemetry_otlp::new_pipeline()
         .tracing()
         .with_exporter(
-            http_exporter()
-                .with_protocol(Protocol::HttpBinary) //can be changed to `Protocol::HttpJson` to export in JSON format
+            opentelemetry_otlp::new_exporter()
+                .http()
                 .with_endpoint("http://localhost:4318/v1/traces"),
         )
-        .with_trace_config(Config::default().with_resource(RESOURCE.clone()))
+        .with_trace_config(sdktrace::config().with_resource(RESOURCE.clone()))
         .install_batch(opentelemetry_sdk::runtime::Tokio)
 }
 
 fn init_metrics() -> Result<opentelemetry_sdk::metrics::SdkMeterProvider, MetricsError> {
-    opentelemetry_otlp::new_pipeline()
+    let provider = opentelemetry_otlp::new_pipeline()
         .metrics(opentelemetry_sdk::runtime::Tokio)
         .with_exporter(
-            http_exporter()
-                .with_protocol(Protocol::HttpBinary) //can be changed to `Protocol::HttpJson` to export in JSON format
+            opentelemetry_otlp::new_exporter()
+                .http()
                 .with_endpoint("http://localhost:4318/v1/metrics"),
         )
         .with_resource(RESOURCE.clone())
-        .build()
+        .build();
+    match provider {
+        Ok(provider) => Ok(provider),
+        Err(err) => Err(err),
+    }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
-    let result = init_tracer_provider();
+    let result = init_tracer();
     assert!(
         result.is_ok(),
         "Init tracer failed with error: {:?}",
         result.err()
     );
-
-    let tracer_provider = result.unwrap();
-    global::set_tracer_provider(tracer_provider.clone());
 
     let result = init_metrics();
     assert!(
@@ -91,7 +80,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     );
 
     let meter_provider = result.unwrap();
-    global::set_meter_provider(meter_provider.clone());
 
     // Opentelemetry will not provide a global API to manage the logger
     // provider. Application users must manage the lifecycle of the logger
@@ -99,26 +87,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     // emitting.
     let logger_provider = init_logs().unwrap();
 
-    // Create a new OpenTelemetryTracingBridge using the above LoggerProvider.
-    let layer = OpenTelemetryTracingBridge::new(&logger_provider);
-
-    // Add a tracing filter to filter events from crates used by opentelemetry-otlp.
-    // The filter levels are set as follows:
-    // - Allow `info` level and above by default.
-    // - Restrict `hyper`, `tonic`, and `reqwest` to `error` level logs only.
-    // This ensures events generated from these crates within the OTLP Exporter are not looped back,
-    // thus preventing infinite event generation.
-    // Note: This will also drop events from these crates used outside the OTLP Exporter.
-    // For more details, see: https://github.com/open-telemetry/opentelemetry-rust/issues/761
-    let filter = EnvFilter::new("info")
-        .add_directive("hyper=error".parse().unwrap())
-        .add_directive("tonic=error".parse().unwrap())
-        .add_directive("reqwest=error".parse().unwrap());
-
-    tracing_subscriber::registry()
-        .with(filter)
-        .with(layer)
-        .init();
+    // Create a new OpenTelemetryLogBridge using the above LoggerProvider.
+    let otel_log_appender = OpenTelemetryLogBridge::new(&logger_provider);
+    log::set_boxed_logger(Box::new(otel_log_appender)).unwrap();
+    log::set_max_level(Level::Info.to_level_filter());
 
     let common_scope_attributes = vec![KeyValue::new("scope-key", "scope-value")];
     let tracer = global::tracer_provider()
@@ -135,7 +107,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     let counter = meter
         .u64_counter("test_counter")
         .with_description("a simple counter for demo purposes.")
-        .with_unit("my_unit")
+        .with_unit(Unit::new("my_unit"))
         .init();
     for _ in 0..10 {
         counter.add(1, &[KeyValue::new("test_key", "test_value")]);

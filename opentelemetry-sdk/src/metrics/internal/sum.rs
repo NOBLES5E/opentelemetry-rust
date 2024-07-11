@@ -1,14 +1,12 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::vec;
 use std::{
-    collections::HashMap,
-    sync::{Mutex, RwLock},
+    collections::{hash_map::Entry, HashMap},
+    sync::Mutex,
     time::SystemTime,
 };
 
+use crate::attributes::AttributeSet;
 use crate::metrics::data::{self, Aggregation, DataPoint, Temporality};
-use crate::metrics::AttributeSet;
-use opentelemetry::KeyValue;
 use opentelemetry::{global, metrics::MetricsError};
 
 use super::{
@@ -18,7 +16,7 @@ use super::{
 
 /// The storage for sums.
 struct ValueMap<T: Number<T>> {
-    values: RwLock<HashMap<AttributeSet, T::AtomicTracker>>,
+    values: Mutex<HashMap<AttributeSet, T>>,
     has_no_value_attribute_value: AtomicBool,
     no_attribute_value: T::AtomicTracker,
 }
@@ -32,7 +30,7 @@ impl<T: Number<T>> Default for ValueMap<T> {
 impl<T: Number<T>> ValueMap<T> {
     fn new() -> Self {
         ValueMap {
-            values: RwLock::new(HashMap::new()),
+            values: Mutex::new(HashMap::new()),
             has_no_value_attribute_value: AtomicBool::new(false),
             no_attribute_value: T::new_atomic_tracker(),
         }
@@ -45,32 +43,22 @@ impl<T: Number<T>> ValueMap<T> {
             self.no_attribute_value.add(measurement);
             self.has_no_value_attribute_value
                 .store(true, Ordering::Release);
-        } else if let Ok(values) = self.values.read() {
-            if let Some(value_to_update) = values.get(&attrs) {
-                value_to_update.add(measurement);
-                return;
-            } else {
-                drop(values);
-                if let Ok(mut values) = self.values.write() {
-                    // Recheck after acquiring write lock, in case another
-                    // thread has added the value.
-                    if let Some(value_to_update) = values.get(&attrs) {
-                        value_to_update.add(measurement);
-                        return;
-                    } else if is_under_cardinality_limit(values.len()) {
-                        let new_value = T::new_atomic_tracker();
-                        new_value.add(measurement);
-                        values.insert(attrs, new_value);
-                    } else if let Some(overflow_value) =
-                        values.get_mut(&STREAM_OVERFLOW_ATTRIBUTE_SET)
-                    {
-                        overflow_value.add(measurement);
-                        return;
+        } else if let Ok(mut values) = self.values.lock() {
+            let size = values.len();
+            match values.entry(attrs) {
+                Entry::Occupied(mut occupied_entry) => {
+                    let sum = occupied_entry.get_mut();
+                    *sum += measurement;
+                }
+                Entry::Vacant(vacant_entry) => {
+                    if is_under_cardinality_limit(size) {
+                        vacant_entry.insert(measurement);
                     } else {
-                        let new_value = T::new_atomic_tracker();
-                        new_value.add(measurement);
-                        values.insert(STREAM_OVERFLOW_ATTRIBUTE_SET.clone(), new_value);
-                        global::handle_error(MetricsError::Other("Warning: Maximum data points for metric stream exceeded. Entry added to overflow. Subsequent overflows to same metric until next collect will not be logged.".into()));
+                        values
+                            .entry(STREAM_OVERFLOW_ATTRIBUTE_SET.clone())
+                            .and_modify(|val| *val += measurement)
+                            .or_insert(measurement);
+                        global::handle_error(MetricsError::Other("Warning: Maximum data points for metric stream exceeded. Entry added to overflow.".into()));
                     }
                 }
             }
@@ -124,7 +112,7 @@ impl<T: Number<T>> Sum<T> {
         s_data.is_monotonic = self.monotonic;
         s_data.data_points.clear();
 
-        let mut values = match self.value_map.values.write() {
+        let mut values = match self.value_map.values.lock() {
             Ok(v) => v,
             Err(_) => return (0, None),
         };
@@ -143,7 +131,7 @@ impl<T: Number<T>> Sum<T> {
             .swap(false, Ordering::AcqRel)
         {
             s_data.data_points.push(DataPoint {
-                attributes: vec![],
+                attributes: AttributeSet::default(),
                 start_time: Some(prev_start),
                 time: Some(t),
                 value: self.value_map.no_attribute_value.get_and_reset_value(),
@@ -153,13 +141,10 @@ impl<T: Number<T>> Sum<T> {
 
         for (attrs, value) in values.drain() {
             s_data.data_points.push(DataPoint {
-                attributes: attrs
-                    .iter()
-                    .map(|(k, v)| KeyValue::new(k.clone(), v.clone()))
-                    .collect(),
+                attributes: attrs,
                 start_time: Some(prev_start),
                 time: Some(t),
-                value: value.get_value(),
+                value,
                 exemplars: vec![],
             });
         }
@@ -196,7 +181,7 @@ impl<T: Number<T>> Sum<T> {
         s_data.is_monotonic = self.monotonic;
         s_data.data_points.clear();
 
-        let values = match self.value_map.values.write() {
+        let values = match self.value_map.values.lock() {
             Ok(v) => v,
             Err(_) => return (0, None),
         };
@@ -216,7 +201,7 @@ impl<T: Number<T>> Sum<T> {
             .load(Ordering::Acquire)
         {
             s_data.data_points.push(DataPoint {
-                attributes: vec![],
+                attributes: AttributeSet::default(),
                 start_time: Some(prev_start),
                 time: Some(t),
                 value: self.value_map.no_attribute_value.get_value(),
@@ -230,13 +215,10 @@ impl<T: Number<T>> Sum<T> {
         // overload the system.
         for (attrs, value) in values.iter() {
             s_data.data_points.push(DataPoint {
-                attributes: attrs
-                    .iter()
-                    .map(|(k, v)| KeyValue::new(k.clone(), v.clone()))
-                    .collect(),
+                attributes: attrs.clone(),
                 start_time: Some(prev_start),
                 time: Some(t),
-                value: value.get_value(),
+                value: *value,
                 exemplars: vec![],
             });
         }
@@ -292,7 +274,7 @@ impl<T: Number<T>> PrecomputedSum<T> {
         s_data.temporality = Temporality::Delta;
         s_data.is_monotonic = self.monotonic;
 
-        let mut values = match self.value_map.values.write() {
+        let mut values = match self.value_map.values.lock() {
             Ok(v) => v,
             Err(_) => return (0, None),
         };
@@ -315,7 +297,7 @@ impl<T: Number<T>> PrecomputedSum<T> {
             .swap(false, Ordering::AcqRel)
         {
             s_data.data_points.push(DataPoint {
-                attributes: vec![],
+                attributes: AttributeSet::default(),
                 start_time: Some(prev_start),
                 time: Some(t),
                 value: self.value_map.no_attribute_value.get_and_reset_value(),
@@ -325,15 +307,12 @@ impl<T: Number<T>> PrecomputedSum<T> {
 
         let default = T::default();
         for (attrs, value) in values.drain() {
-            let delta = value.get_value() - *reported.get(&attrs).unwrap_or(&default);
+            let delta = value - *reported.get(&attrs).unwrap_or(&default);
             if delta != default {
-                new_reported.insert(attrs.clone(), value.get_value());
+                new_reported.insert(attrs.clone(), value);
             }
             s_data.data_points.push(DataPoint {
-                attributes: attrs
-                    .iter()
-                    .map(|(k, v)| KeyValue::new(k.clone(), v.clone()))
-                    .collect(),
+                attributes: attrs.clone(),
                 start_time: Some(prev_start),
                 time: Some(t),
                 value: delta,
@@ -377,7 +356,7 @@ impl<T: Number<T>> PrecomputedSum<T> {
         s_data.temporality = Temporality::Cumulative;
         s_data.is_monotonic = self.monotonic;
 
-        let values = match self.value_map.values.write() {
+        let values = match self.value_map.values.lock() {
             Ok(v) => v,
             Err(_) => return (0, None),
         };
@@ -400,7 +379,7 @@ impl<T: Number<T>> PrecomputedSum<T> {
             .load(Ordering::Acquire)
         {
             s_data.data_points.push(DataPoint {
-                attributes: vec![],
+                attributes: AttributeSet::default(),
                 start_time: Some(prev_start),
                 time: Some(t),
                 value: self.value_map.no_attribute_value.get_value(),
@@ -410,15 +389,12 @@ impl<T: Number<T>> PrecomputedSum<T> {
 
         let default = T::default();
         for (attrs, value) in values.iter() {
-            let delta = value.get_value() - *reported.get(attrs).unwrap_or(&default);
+            let delta = *value - *reported.get(attrs).unwrap_or(&default);
             if delta != default {
-                new_reported.insert(attrs.clone(), value.get_value());
+                new_reported.insert(attrs.clone(), *value);
             }
             s_data.data_points.push(DataPoint {
-                attributes: attrs
-                    .iter()
-                    .map(|(k, v)| KeyValue::new(k.clone(), v.clone()))
-                    .collect(),
+                attributes: attrs.clone(),
                 start_time: Some(prev_start),
                 time: Some(t),
                 value: delta,

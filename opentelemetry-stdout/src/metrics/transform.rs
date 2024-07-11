@@ -1,4 +1,4 @@
-use crate::common::{KeyValue, Resource, Scope};
+use crate::common::{AttributeSet, KeyValue, Resource, Scope};
 use opentelemetry::{global, metrics::MetricsError};
 use opentelemetry_sdk::metrics::data;
 use serde::{Serialize, Serializer};
@@ -61,13 +61,28 @@ impl From<data::ScopeMetrics> for ScopeMetrics {
 }
 
 #[derive(Serialize, Debug, Clone)]
+struct Unit(Cow<'static, str>);
+
+impl Unit {
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<opentelemetry::metrics::Unit> for Unit {
+    fn from(unit: opentelemetry::metrics::Unit) -> Self {
+        Unit(unit.as_str().to_string().into())
+    }
+}
+
+#[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 struct Metric {
     name: Cow<'static, str>,
     #[serde(skip_serializing_if = "str::is_empty")]
     description: Cow<'static, str>,
-    #[serde(skip_serializing_if = "str::is_empty")]
-    unit: Cow<'static, str>,
+    #[serde(skip_serializing_if = "Unit::is_empty")]
+    unit: Unit,
     #[serde(flatten)]
     data: Option<MetricData>,
 }
@@ -77,7 +92,7 @@ impl From<data::Metric> for Metric {
         Metric {
             name: value.name,
             description: value.description,
-            unit: value.unit,
+            unit: value.unit.into(),
             data: map_data(value.data.as_any()),
         }
     }
@@ -215,7 +230,7 @@ impl<T: Into<DataValue> + Copy> From<&data::Sum<T>> for Sum {
 #[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 struct DataPoint {
-    attributes: Vec<KeyValue>,
+    attributes: AttributeSet,
     #[serde(serialize_with = "as_opt_human_readable")]
     start_time: Option<SystemTime>,
     #[serde(serialize_with = "as_opt_human_readable")]
@@ -238,7 +253,7 @@ fn is_zero_u8(v: &u8) -> bool {
 impl<T: Into<DataValue> + Copy> From<&data::DataPoint<T>> for DataPoint {
     fn from(value: &data::DataPoint<T>) -> Self {
         DataPoint {
-            attributes: value.attributes.iter().map(Into::into).collect(),
+            attributes: AttributeSet::from(&value.attributes),
             start_time_unix_nano: value.start_time,
             time_unix_nano: value.time,
             start_time: value.start_time,
@@ -269,7 +284,7 @@ impl<T: Into<DataValue> + Copy> From<&data::Histogram<T>> for Histogram {
 #[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 struct HistogramDataPoint {
-    attributes: Vec<KeyValue>,
+    attributes: AttributeSet,
     #[serde(serialize_with = "as_unix_nano")]
     start_time_unix_nano: SystemTime,
     #[serde(serialize_with = "as_unix_nano")]
@@ -291,7 +306,7 @@ struct HistogramDataPoint {
 impl<T: Into<DataValue> + Copy> From<&data::HistogramDataPoint<T>> for HistogramDataPoint {
     fn from(value: &data::HistogramDataPoint<T>) -> Self {
         HistogramDataPoint {
-            attributes: value.attributes.iter().map(Into::into).collect(),
+            attributes: AttributeSet::from(&value.attributes),
             start_time_unix_nano: value.start_time,
             time_unix_nano: value.time,
             start_time: value.start_time,
@@ -326,7 +341,7 @@ impl<T: Into<DataValue> + Copy> From<&data::ExponentialHistogram<T>> for Exponen
 #[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 struct ExponentialHistogramDataPoint {
-    attributes: Vec<KeyValue>,
+    attributes: AttributeSet,
     #[serde(serialize_with = "as_unix_nano")]
     start_time_unix_nano: SystemTime,
     #[serde(serialize_with = "as_unix_nano")]
@@ -353,7 +368,7 @@ impl<T: Into<DataValue> + Copy> From<&data::ExponentialHistogramDataPoint<T>>
 {
     fn from(value: &data::ExponentialHistogramDataPoint<T>) -> Self {
         ExponentialHistogramDataPoint {
-            attributes: value.attributes.iter().map(Into::into).collect(),
+            attributes: AttributeSet::from(&value.attributes),
             start_time_unix_nano: value.start_time,
             time_unix_nano: value.time,
             start_time: value.start_time,

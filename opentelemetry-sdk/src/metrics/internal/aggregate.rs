@@ -5,7 +5,7 @@ use opentelemetry::KeyValue;
 
 use crate::{
     metrics::data::{Aggregation, Gauge, Temporality},
-    metrics::AttributeSet,
+    AttributeSet,
 };
 
 use super::{
@@ -24,7 +24,7 @@ pub(crate) static STREAM_OVERFLOW_ATTRIBUTE_SET: Lazy<AttributeSet> = Lazy::new(
 
 /// Checks whether aggregator has hit cardinality limit for metric streams
 pub(crate) fn is_under_cardinality_limit(size: usize) -> bool {
-    size < STREAM_CARDINALITY_LIMIT as usize
+    size < STREAM_CARDINALITY_LIMIT as usize - 1
 }
 
 /// Receives measurements to be aggregated.
@@ -217,7 +217,7 @@ mod tests {
         DataPoint, ExponentialBucket, ExponentialHistogram, ExponentialHistogramDataPoint,
         Histogram, HistogramDataPoint, Sum,
     };
-    use std::{time::SystemTime, vec};
+    use std::time::SystemTime;
 
     use super::*;
 
@@ -226,7 +226,7 @@ mod tests {
         let (measure, agg) = AggregateBuilder::<u64>::new(None, None).last_value();
         let mut a = Gauge {
             data_points: vec![DataPoint {
-                attributes: vec![KeyValue::new("a", 1)],
+                attributes: AttributeSet::from(&[KeyValue::new("a", 1)][..]),
                 start_time: Some(SystemTime::now()),
                 time: Some(SystemTime::now()),
                 value: 1u64,
@@ -241,7 +241,10 @@ mod tests {
         assert_eq!(count, 1);
         assert!(new_agg.is_none());
         assert_eq!(a.data_points.len(), 1);
-        assert_eq!(a.data_points[0].attributes, new_attributes.to_vec());
+        assert_eq!(
+            a.data_points[0].attributes,
+            AttributeSet::from(&new_attributes[..])
+        );
         assert_eq!(a.data_points[0].value, 2);
     }
 
@@ -253,14 +256,14 @@ mod tests {
             let mut a = Sum {
                 data_points: vec![
                     DataPoint {
-                        attributes: vec![KeyValue::new("a1", 1)],
+                        attributes: AttributeSet::from(&[KeyValue::new("a1", 1)][..]),
                         start_time: Some(SystemTime::now()),
                         time: Some(SystemTime::now()),
                         value: 1u64,
                         exemplars: vec![],
                     },
                     DataPoint {
-                        attributes: vec![KeyValue::new("a2", 1)],
+                        attributes: AttributeSet::from(&[KeyValue::new("a2", 2)][..]),
                         start_time: Some(SystemTime::now()),
                         time: Some(SystemTime::now()),
                         value: 2u64,
@@ -284,7 +287,10 @@ mod tests {
             assert_eq!(a.temporality, temporality);
             assert!(a.is_monotonic);
             assert_eq!(a.data_points.len(), 1);
-            assert_eq!(a.data_points[0].attributes, new_attributes.to_vec());
+            assert_eq!(
+                a.data_points[0].attributes,
+                AttributeSet::from(&new_attributes[..])
+            );
             assert_eq!(a.data_points[0].value, 3);
         }
     }
@@ -296,14 +302,14 @@ mod tests {
             let mut a = Sum {
                 data_points: vec![
                     DataPoint {
-                        attributes: vec![KeyValue::new("a1", 1)],
+                        attributes: AttributeSet::from(&[KeyValue::new("a1", 1)][..]),
                         start_time: Some(SystemTime::now()),
                         time: Some(SystemTime::now()),
                         value: 1u64,
                         exemplars: vec![],
                     },
                     DataPoint {
-                        attributes: vec![KeyValue::new("a2", 1)],
+                        attributes: AttributeSet::from(&[KeyValue::new("a2", 2)][..]),
                         start_time: Some(SystemTime::now()),
                         time: Some(SystemTime::now()),
                         value: 2u64,
@@ -327,7 +333,10 @@ mod tests {
             assert_eq!(a.temporality, temporality);
             assert!(a.is_monotonic);
             assert_eq!(a.data_points.len(), 1);
-            assert_eq!(a.data_points[0].attributes, new_attributes.to_vec());
+            assert_eq!(
+                a.data_points[0].attributes,
+                AttributeSet::from(&new_attributes[..])
+            );
             assert_eq!(a.data_points[0].value, 3);
         }
     }
@@ -339,7 +348,7 @@ mod tests {
                 .explicit_bucket_histogram(vec![1.0], true, true);
             let mut a = Histogram {
                 data_points: vec![HistogramDataPoint {
-                    attributes: vec![KeyValue::new("a1", 1)],
+                    attributes: AttributeSet::from(&[KeyValue::new("a2", 2)][..]),
                     start_time: SystemTime::now(),
                     time: SystemTime::now(),
                     count: 2,
@@ -365,7 +374,10 @@ mod tests {
             assert!(new_agg.is_none());
             assert_eq!(a.temporality, temporality);
             assert_eq!(a.data_points.len(), 1);
-            assert_eq!(a.data_points[0].attributes, new_attributes.to_vec());
+            assert_eq!(
+                a.data_points[0].attributes,
+                AttributeSet::from(&new_attributes[..])
+            );
             assert_eq!(a.data_points[0].count, 1);
             assert_eq!(a.data_points[0].bounds, vec![1.0]);
             assert_eq!(a.data_points[0].bucket_counts, vec![0, 1]);
@@ -382,7 +394,7 @@ mod tests {
                 .exponential_bucket_histogram(4, 20, true, true);
             let mut a = ExponentialHistogram {
                 data_points: vec![ExponentialHistogramDataPoint {
-                    attributes: vec![KeyValue::new("a1", 1)],
+                    attributes: AttributeSet::from(&[KeyValue::new("a2", 2)][..]),
                     start_time: SystemTime::now(),
                     time: SystemTime::now(),
                     count: 2,
@@ -417,7 +429,10 @@ mod tests {
             assert!(new_agg.is_none());
             assert_eq!(a.temporality, temporality);
             assert_eq!(a.data_points.len(), 1);
-            assert_eq!(a.data_points[0].attributes, new_attributes.to_vec());
+            assert_eq!(
+                a.data_points[0].attributes,
+                AttributeSet::from(&new_attributes[..])
+            );
             assert_eq!(a.data_points[0].count, 1);
             assert_eq!(a.data_points[0].min, Some(3));
             assert_eq!(a.data_points[0].max, Some(3));

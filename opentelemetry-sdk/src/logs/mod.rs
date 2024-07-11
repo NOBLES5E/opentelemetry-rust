@@ -1,9 +1,11 @@
 //! # OpenTelemetry Log SDK
 
+mod config;
 mod log_emitter;
 mod log_processor;
 mod record;
 
+pub use config::{config, Config};
 pub use log_emitter::{Builder, Logger, LoggerProvider};
 pub use log_processor::{
     BatchConfig, BatchConfigBuilder, BatchLogProcessor, BatchLogProcessorBuilder, LogProcessor,
@@ -33,7 +35,7 @@ mod tests {
         ]);
         let exporter: InMemoryLogsExporter = InMemoryLogsExporter::default();
         let logger_provider = LoggerProvider::builder()
-            .with_resource(resource.clone())
+            .with_config(Config::default().with_resource(resource.clone()))
             .with_log_processor(SimpleLogProcessor::new(Box::new(exporter.clone())))
             .build();
 

@@ -71,14 +71,6 @@ impl LogRecord for NoopLogRecord {
         V: Into<AnyValue>,
     {
     }
-
-    #[inline]
-    // Sets the `target` of a record
-    fn set_target<T>(&mut self, _target: T)
-    where
-        T: Into<Cow<'static, str>>,
-    {
-    }
 }
 
 /// A no-op implementation of a [`Logger`]

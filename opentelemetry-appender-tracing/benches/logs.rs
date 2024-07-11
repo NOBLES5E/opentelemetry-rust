@@ -1,7 +1,7 @@
 /*
     The benchmark results:
     criterion = "0.5.1"
-    OS: Ubuntu 22.04.3 LTS (5.15.146.1-microsoft-standard-WSL2)
+    OS: Ubuntu 22.04.2 LTS (5.10.102.1-microsoft-standard-WSL2)
     Hardware: AMD EPYC 7763 64-Core Processor - 2.44 GHz, 16vCPUs,
     RAM: 64.0 GB
     | Test                        | Average time|
@@ -10,7 +10,7 @@
     | noop_layer_disabled         | 12 ns       |
     | noop_layer_enabled          | 25 ns       |
     | ot_layer_disabled           | 19 ns       |
-    | ot_layer_enabled            | 305 ns      |
+    | ot_layer_enabled           | 561 ns       |
 */
 
 use async_trait::async_trait;
@@ -19,9 +19,8 @@ use opentelemetry::logs::LogResult;
 use opentelemetry::KeyValue;
 use opentelemetry_appender_tracing::layer as tracing_layer;
 use opentelemetry_sdk::export::logs::{LogData, LogExporter};
-use opentelemetry_sdk::logs::{LogProcessor, LoggerProvider};
+use opentelemetry_sdk::logs::{Config, LogProcessor, LoggerProvider};
 use opentelemetry_sdk::Resource;
-use pprof::criterion::{Output, PProfProfiler};
 use tracing::error;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::Layer;
@@ -34,7 +33,7 @@ struct NoopExporter {
 
 #[async_trait]
 impl LogExporter for NoopExporter {
-    async fn export<'a>(&mut self, _: Vec<std::borrow::Cow<'a, LogData>>) -> LogResult<()> {
+    async fn export(&mut self, _: Vec<LogData>) -> LogResult<()> {
         LogResult::Ok(())
     }
 
@@ -55,7 +54,7 @@ impl NoopProcessor {
 }
 
 impl LogProcessor for NoopProcessor {
-    fn emit(&self, _: &mut LogData) {
+    fn emit(&self, _: LogData) {
         // no-op
     }
 
@@ -126,10 +125,12 @@ fn benchmark_with_ot_layer(c: &mut Criterion, enabled: bool, bench_name: &str) {
     let exporter = NoopExporter { enabled };
     let processor = NoopProcessor::new(Box::new(exporter));
     let provider = LoggerProvider::builder()
-        .with_resource(Resource::new(vec![KeyValue::new(
-            "service.name",
-            "benchmark",
-        )]))
+        .with_config(
+            Config::default().with_resource(Resource::new(vec![KeyValue::new(
+                "service.name",
+                "benchmark",
+            )])),
+        )
         .with_log_processor(processor)
         .build();
     let ot_layer = tracing_layer::OpenTelemetryTracingBridge::new(&provider);
@@ -174,16 +175,5 @@ fn criterion_benchmark(c: &mut Criterion) {
     benchmark_with_noop_layer(c, false, "noop_layer_disabled");
 }
 
-#[cfg(not(target_os = "windows"))]
-criterion_group! {
-    name = benches;
-    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
-    targets = criterion_benchmark
-}
-#[cfg(target_os = "windows")]
-criterion_group! {
-    name = benches;
-    config = Criterion::default();
-    targets = criterion_benchmark
-}
+criterion_group!(benches, criterion_benchmark);
 criterion_main!(benches);

@@ -14,7 +14,7 @@ use std::fmt::Debug;
 
 use opentelemetry::logs::LogError;
 
-use opentelemetry_sdk::{export::logs::LogData, runtime::RuntimeChannel, Resource};
+use opentelemetry_sdk::{export::logs::LogData, runtime::RuntimeChannel};
 
 /// Compression algorithm to use, defaults to none.
 pub const OTEL_EXPORTER_OTLP_LOGS_COMPRESSION: &str = "OTEL_EXPORTER_OTLP_LOGS_COMPRESSION";
@@ -35,7 +35,7 @@ impl OtlpPipeline {
     /// Create a OTLP logging pipeline.
     pub fn logging(self) -> OtlpLogPipeline<NoExporterConfig> {
         OtlpLogPipeline {
-            resource: None,
+            log_config: None,
             exporter_builder: NoExporterConfig(()),
             batch_config: None,
         }
@@ -98,10 +98,7 @@ impl LogExporter {
 
 #[async_trait]
 impl opentelemetry_sdk::export::logs::LogExporter for LogExporter {
-    async fn export<'a>(
-        &mut self,
-        batch: Vec<std::borrow::Cow<'a, LogData>>,
-    ) -> opentelemetry::logs::LogResult<()> {
+    async fn export(&mut self, batch: Vec<LogData>) -> opentelemetry::logs::LogResult<()> {
         self.client.export(batch).await
     }
 
@@ -114,17 +111,15 @@ impl opentelemetry_sdk::export::logs::LogExporter for LogExporter {
 #[derive(Debug)]
 pub struct OtlpLogPipeline<EB> {
     exporter_builder: EB,
-    resource: Option<Resource>,
+    log_config: Option<opentelemetry_sdk::logs::Config>,
     batch_config: Option<opentelemetry_sdk::logs::BatchConfig>,
 }
 
 impl<EB> OtlpLogPipeline<EB> {
-    /// Set the Resource associated with log provider.
-    pub fn with_resource(self, resource: Resource) -> Self {
-        OtlpLogPipeline {
-            resource: Some(resource),
-            ..self
-        }
+    /// Set the log provider configuration.
+    pub fn with_log_config(mut self, log_config: opentelemetry_sdk::logs::Config) -> Self {
+        self.log_config = Some(log_config);
+        self
     }
 
     /// Set the batch log processor configuration, and it will override the env vars.
@@ -142,7 +137,7 @@ impl OtlpLogPipeline<NoExporterConfig> {
     ) -> OtlpLogPipeline<LogExporterBuilder> {
         OtlpLogPipeline {
             exporter_builder: pipeline.into(),
-            resource: self.resource,
+            log_config: self.log_config,
             batch_config: self.batch_config,
         }
     }
@@ -151,29 +146,29 @@ impl OtlpLogPipeline<NoExporterConfig> {
 impl OtlpLogPipeline<LogExporterBuilder> {
     /// Install the configured log exporter.
     ///
-    /// Returns a [`LoggerProvider`].
+    /// Returns a [`Logger`] with the name `opentelemetry-otlp` and the current crate version.
     ///
-    /// [`LoggerProvider`]: opentelemetry_sdk::logs::LoggerProvider
+    /// [`Logger`]: opentelemetry_sdk::logs::Logger
     pub fn install_simple(self) -> Result<opentelemetry_sdk::logs::LoggerProvider, LogError> {
         Ok(build_simple_with_exporter(
             self.exporter_builder.build_log_exporter()?,
-            self.resource,
+            self.log_config,
         ))
     }
 
     /// Install the configured log exporter and a batch log processor using the
     /// specified runtime.
     ///
-    /// Returns a [`LoggerProvider`].
+    /// Returns a [`Logger`] with the name `opentelemetry-otlp` and the current crate version.
     ///
-    /// [`LoggerProvider`]: opentelemetry_sdk::logs::LoggerProvider
+    /// [`Logger`]: opentelemetry_sdk::logs::Logger
     pub fn install_batch<R: RuntimeChannel>(
         self,
         runtime: R,
     ) -> Result<opentelemetry_sdk::logs::LoggerProvider, LogError> {
         Ok(build_batch_with_exporter(
             self.exporter_builder.build_log_exporter()?,
-            self.resource,
+            self.log_config,
             runtime,
             self.batch_config,
         ))
@@ -182,21 +177,20 @@ impl OtlpLogPipeline<LogExporterBuilder> {
 
 fn build_simple_with_exporter(
     exporter: LogExporter,
-    resource: Option<Resource>,
+    log_config: Option<opentelemetry_sdk::logs::Config>,
 ) -> opentelemetry_sdk::logs::LoggerProvider {
     let mut provider_builder =
         opentelemetry_sdk::logs::LoggerProvider::builder().with_simple_exporter(exporter);
-    if let Some(resource) = resource {
-        provider_builder = provider_builder.with_resource(resource);
+    if let Some(config) = log_config {
+        provider_builder = provider_builder.with_config(config);
     }
-    // logger would be created in the appenders like
-    // opentelemetry-appender-tracing, opentelemetry-appender-log etc.
+    // logger would be created in the tracing appender
     provider_builder.build()
 }
 
 fn build_batch_with_exporter<R: RuntimeChannel>(
     exporter: LogExporter,
-    resource: Option<Resource>,
+    log_config: Option<opentelemetry_sdk::logs::Config>,
     runtime: R,
     batch_config: Option<opentelemetry_sdk::logs::BatchConfig>,
 ) -> opentelemetry_sdk::logs::LoggerProvider {
@@ -206,8 +200,8 @@ fn build_batch_with_exporter<R: RuntimeChannel>(
         .build();
     provider_builder = provider_builder.with_log_processor(batch_processor);
 
-    if let Some(resource) = resource {
-        provider_builder = provider_builder.with_resource(resource);
+    if let Some(config) = log_config {
+        provider_builder = provider_builder.with_config(config);
     }
     // logger would be created in the tracing appender
     provider_builder.build()

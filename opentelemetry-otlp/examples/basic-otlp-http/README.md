@@ -1,9 +1,9 @@
 # Basic OTLP exporter Example
 
 This example shows how to setup OpenTelemetry OTLP exporter for logs, metrics
-and traces to export them to the [OpenTelemetry
+and traces to exports them to the [OpenTelemetry
 Collector](https://github.com/open-telemetry/opentelemetry-collector) via OTLP
-over selected protocol such as HTTP/protobuf or HTTP/json. The Collector then sends the data to the appropriate
+over HTTP/protobuf. The Collector then sends the data to the appropriate
 backend, in this case, the logging Exporter, which displays data to console.
 
 ## Usage
@@ -51,14 +51,6 @@ Run the app which exports logs, metrics and traces via OTLP to the collector
 ```shell
 cargo run
 ```
-
-
-By default the app will use a `reqwest` client to send. A hyper 0.14 client can be used with the `hyper` feature enabled
-
-```shell
-cargo run --no-default-features --features=hyper
-```
-
 
 ## View results
 

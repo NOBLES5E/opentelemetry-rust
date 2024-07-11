@@ -1,5 +1,4 @@
 use crate::export::trace::{ExportResult, SpanData, SpanExporter};
-use crate::resource::Resource;
 use futures_util::future::BoxFuture;
 use opentelemetry::trace::{TraceError, TraceResult};
 use std::sync::{Arc, Mutex};
@@ -52,7 +51,6 @@ use std::sync::{Arc, Mutex};
 #[derive(Clone, Debug)]
 pub struct InMemorySpanExporter {
     spans: Arc<Mutex<Vec<SpanData>>>,
-    resource: Arc<Mutex<Resource>>,
 }
 
 impl Default for InMemorySpanExporter {
@@ -87,7 +85,6 @@ impl InMemorySpanExporterBuilder {
     pub fn build(&self) -> InMemorySpanExporter {
         InMemorySpanExporter {
             spans: Arc::new(Mutex::new(Vec::new())),
-            resource: Arc::new(Mutex::new(Resource::default())),
         }
     }
 }
@@ -144,12 +141,5 @@ impl SpanExporter for InMemorySpanExporter {
 
     fn shutdown(&mut self) {
         self.reset()
-    }
-
-    fn set_resource(&mut self, resource: &Resource) {
-        self.resource
-            .lock()
-            .map(|mut res_guard| *res_guard = resource.clone())
-            .expect("Resource lock poisoned");
     }
 }

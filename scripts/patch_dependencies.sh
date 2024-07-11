@@ -6,5 +6,3 @@ function patch_version() {
   cargo update -p $1:$latest_version --precise $2
 }
 
-patch_version cc 1.0.105
-patch_version url 2.5.0

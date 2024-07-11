@@ -4,19 +4,9 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
-[[bin]] # Bin to run the metrics stress tests for Counter
+[[bin]] # Bin to run the metrics stress tests
 name = "metrics"
-path = "src/metrics_counter.rs"
-doc = false
-
-[[bin]] # Bin to run the metrics stress tests for Histogram
-name = "metrics_histogram"
-path = "src/metrics_histogram.rs"
-doc = false
-
-[[bin]] # Bin to run the metrics overflow stress tests
-name = "metrics_overflow"
-path = "src/metrics_overflow.rs"
+path = "src/metrics.rs"
 doc = false
 
 [[bin]] # Bin to run the logs stress tests
@@ -43,10 +33,5 @@ opentelemetry_sdk = { path = "../opentelemetry-sdk", features = ["metrics", "log
 opentelemetry-appender-tracing = { path = "../opentelemetry-appender-tracing"}
 rand = { version = "0.8.4", features = ["small_rng"] }
 tracing = { workspace = true, features = ["std"]}
-tracing-core = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["registry", "std"] }
 num-format = "0.4.4"
-sysinfo = { version = "0.30.12", optional = true }
-
-[features]
-stats = ["sysinfo"]

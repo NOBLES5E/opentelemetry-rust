@@ -11,8 +11,10 @@ use tracing_subscriber::Layer;
 const INSTRUMENTATION_LIBRARY_NAME: &str = "opentelemetry-appender-tracing";
 
 /// Visitor to record the fields from the event record.
-struct EventVisitor<'a, LR: LogRecord> {
-    log_record: &'a mut LR,
+#[derive(Default)]
+struct EventVisitor {
+    log_record_attributes: Vec<(Key, AnyValue)>,
+    log_record_body: Option<AnyValue>,
 }
 
 /// Logs from the log crate have duplicated attributes that we removed here.
@@ -35,13 +37,10 @@ fn get_filename(filepath: &str) -> &str {
     filepath
 }
 
-impl<'a, LR: LogRecord> EventVisitor<'a, LR> {
-    fn new(log_record: &'a mut LR) -> Self {
-        EventVisitor { log_record }
-    }
+impl EventVisitor {
     fn visit_metadata(&mut self, meta: &Metadata) {
-        self.log_record
-            .add_attribute(Key::new("name"), AnyValue::from(meta.name()));
+        self.log_record_attributes
+            .push(("name".into(), meta.name().into()));
 
         #[cfg(feature = "experimental_metadata_attributes")]
         self.visit_experimental_metadata(meta);
@@ -49,47 +48,48 @@ impl<'a, LR: LogRecord> EventVisitor<'a, LR> {
 
     #[cfg(feature = "experimental_metadata_attributes")]
     fn visit_experimental_metadata(&mut self, meta: &Metadata) {
-        self.log_record.add_attribute(
-            Key::new("log.target"),
-            AnyValue::from(meta.target().to_owned()),
-        );
+        self.log_record_attributes
+            .push(("log.target".into(), meta.target().to_owned().into()));
 
         if let Some(module_path) = meta.module_path() {
-            self.log_record.add_attribute(
-                Key::new("code.namespace"),
-                AnyValue::from(module_path.to_owned()),
-            );
+            self.log_record_attributes
+                .push(("code.namespace".into(), module_path.to_owned().into()));
         }
 
         if let Some(filepath) = meta.file() {
-            self.log_record.add_attribute(
-                Key::new("code.filepath"),
-                AnyValue::from(filepath.to_owned()),
-            );
-            self.log_record.add_attribute(
-                Key::new("code.filename"),
-                AnyValue::from(get_filename(filepath).to_owned()),
-            );
+            self.log_record_attributes
+                .push(("code.filepath".into(), filepath.to_owned().into()));
+            self.log_record_attributes.push((
+                "code.filename".into(),
+                get_filename(filepath).to_owned().into(),
+            ));
         }
 
         if let Some(line) = meta.line() {
-            self.log_record
-                .add_attribute(Key::new("code.lineno"), AnyValue::from(line));
+            self.log_record_attributes
+                .push(("code.lineno".into(), line.into()));
         }
+    }
+
+    fn push_to_otel_log_record<LR: LogRecord>(self, log_record: &mut LR) {
+        if let Some(body) = self.log_record_body {
+            log_record.set_body(body);
+        }
+        log_record.add_attributes(self.log_record_attributes);
     }
 }
 
-impl<'a, LR: LogRecord> tracing::field::Visit for EventVisitor<'a, LR> {
+impl tracing::field::Visit for EventVisitor {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
         #[cfg(feature = "experimental_metadata_attributes")]
         if is_duplicated_metadata(field.name()) {
             return;
         }
         if field.name() == "message" {
-            self.log_record.set_body(format!("{:?}", value).into());
+            self.log_record_body = Some(format!("{value:?}").into());
         } else {
-            self.log_record
-                .add_attribute(Key::new(field.name()), AnyValue::from(format!("{value:?}")));
+            self.log_record_attributes
+                .push((field.name().into(), format!("{value:?}").into()));
         }
     }
 
@@ -98,18 +98,18 @@ impl<'a, LR: LogRecord> tracing::field::Visit for EventVisitor<'a, LR> {
         if is_duplicated_metadata(field.name()) {
             return;
         }
-        self.log_record
-            .add_attribute(Key::new(field.name()), AnyValue::from(value.to_owned()));
+        self.log_record_attributes
+            .push((field.name().into(), value.to_owned().into()));
     }
 
     fn record_bool(&mut self, field: &tracing_core::Field, value: bool) {
-        self.log_record
-            .add_attribute(Key::new(field.name()), AnyValue::from(value));
+        self.log_record_attributes
+            .push((field.name().into(), value.into()));
     }
 
     fn record_f64(&mut self, field: &tracing::field::Field, value: f64) {
-        self.log_record
-            .add_attribute(Key::new(field.name()), AnyValue::from(value));
+        self.log_record_attributes
+            .push((field.name().into(), value.into()));
     }
 
     fn record_i64(&mut self, field: &tracing::field::Field, value: i64) {
@@ -117,8 +117,8 @@ impl<'a, LR: LogRecord> tracing::field::Visit for EventVisitor<'a, LR> {
         if is_duplicated_metadata(field.name()) {
             return;
         }
-        self.log_record
-            .add_attribute(Key::new(field.name()), AnyValue::from(value));
+        self.log_record_attributes
+            .push((field.name().into(), value.into()));
     }
 
     // TODO: Remaining field types from AnyValue : Bytes, ListAny, Boolean
@@ -172,12 +172,12 @@ where
         let mut log_record = self.logger.create_log_record();
         log_record.set_severity_number(severity_of_level(meta.level()));
         log_record.set_severity_text(meta.level().to_string().into());
-        log_record.set_target(meta.target().to_string());
 
-        let mut visitor = EventVisitor::new(&mut log_record);
+        let mut visitor = EventVisitor::default();
         visitor.visit_metadata(meta);
         // Visit fields.
         event.record(&mut visitor);
+        visitor.push_to_otel_log_record(&mut log_record);
 
         self.logger.emit(log_record);
     }
@@ -213,8 +213,7 @@ mod tests {
     use opentelemetry::{logs::AnyValue, Key};
     use opentelemetry_sdk::logs::LoggerProvider;
     use opentelemetry_sdk::testing::logs::InMemoryLogsExporter;
-    use opentelemetry_sdk::trace;
-    use opentelemetry_sdk::trace::{Sampler, TracerProvider};
+    use opentelemetry_sdk::trace::{config, Sampler, TracerProvider};
     use tracing::error;
     use tracing_subscriber::layer::SubscriberExt;
 
@@ -302,7 +301,7 @@ mod tests {
 
         // setup tracing as well.
         let tracer_provider = TracerProvider::builder()
-            .with_config(trace::Config::default().with_sampler(Sampler::AlwaysOn))
+            .with_config(config().with_sampler(Sampler::AlwaysOn))
             .build();
         let tracer = tracer_provider.tracer("test-tracer");
 
@@ -466,7 +465,7 @@ mod tests {
 
         // setup tracing as well.
         let tracer_provider = TracerProvider::builder()
-            .with_config(trace::Config::default().with_sampler(Sampler::AlwaysOn))
+            .with_config(config().with_sampler(Sampler::AlwaysOn))
             .build();
         let tracer = tracer_provider.tracer("test-tracer");
 
